@@ -102,6 +102,41 @@ def value_to_hex_color(v, vmin, vmax):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def format_legend_value(value):
+    # 如果数值是整数，则使用整数格式显示，避免出现 1.0 这种不必要的小数形式。
+    if float(value).is_integer():
+        return str(int(value))
+
+    # 非整数使用两位小数，保证图例文本简洁且可读。
+    return f"{value:.2f}"
+
+
+def build_legend_values(samples):
+    # 先把所有样本中的数值拍平成一个列表，方便统一分析。
+    all_values = [value for sample in samples for value in sample]
+    unique_values = sorted(set(all_values))
+
+    # 如果样本是 0/1/2/3 这种离散整数值，则固定展示 0、1、2、3 四个图例项，
+    # 这样即使某个数值在当前样本里没出现，图例也仍然完整。
+    if unique_values and all(float(int(v)) == v for v in unique_values):
+        integer_values = [int(v) for v in unique_values]
+        if all(0 <= v <= 3 for v in integer_values):
+            return [0.0, 1.0, 2.0, 3.0]
+
+    # 当唯一值较少时，直接把唯一值作为图例项，方便逐一查看映射关系。
+    if len(unique_values) <= 10:
+        return unique_values
+
+    # 当唯一值过多时，抽样 6 个刻度值，避免图例过长。
+    tick_count = 6
+    vmin = min(unique_values)
+    vmax = max(unique_values)
+    if vmax <= vmin:
+        return [vmin]
+    step = (vmax - vmin) / (tick_count - 1)
+    return [vmin + i * step for i in range(tick_count)]
+
+
 def visualize_svg(samples, output_path, show_ids=False, columns=4):
     coords = build_hex_coordinates()
     pairs = build_neighbor_pairs(coords)
@@ -126,7 +161,9 @@ def visualize_svg(samples, output_path, show_ids=False, columns=4):
 
     cols = max(1, columns)
     rows = math.ceil(sample_count / cols)
-    canvas_w = cols * tile_w
+    legend_values = build_legend_values(samples)
+    legend_w = 190.0 if legend_values else 0.0
+    canvas_w = cols * tile_w + legend_w
     canvas_h = rows * tile_h
 
     elements = []
@@ -177,6 +214,40 @@ def visualize_svg(samples, output_path, show_ids=False, columns=4):
                 )
 
         elements.append("</g>")
+
+    # 在右侧新增图例区域，明确每种颜色对应的数值。
+    if legend_values:
+        legend_x = cols * tile_w + 18.0
+        legend_y = 28.0
+        legend_item_gap = 34.0
+        legend_box_w = legend_w - 28.0
+        legend_box_h = 56.0 + len(legend_values) * legend_item_gap
+
+        elements.append(
+            f'<rect x="{legend_x:.2f}" y="{legend_y:.2f}" width="{legend_box_w:.2f}" '
+            f'height="{legend_box_h:.2f}" rx="12" ry="12" fill="#fafafa" stroke="#d8d8d8" stroke-width="1.2"/>'
+        )
+        elements.append(
+            f'<text x="{legend_x + 14:.2f}" y="{legend_y + 24:.2f}" '
+            f'font-family="Arial, sans-serif" font-size="14" fill="#222" font-weight="bold">Legend</text>'
+        )
+        elements.append(
+            f'<text x="{legend_x + 14:.2f}" y="{legend_y + 42:.2f}" '
+            f'font-family="Arial, sans-serif" font-size="11" fill="#666">Color -> Value</text>'
+        )
+
+        for idx, value in enumerate(legend_values):
+            cy = legend_y + 64.0 + idx * legend_item_gap
+            color = value_to_hex_color(value, vmin, vmax)
+            label = format_legend_value(value)
+            elements.append(
+                f'<circle cx="{legend_x + 18:.2f}" cy="{cy:.2f}" r="10" fill="{color}" '
+                f'stroke="#2f2f2f" stroke-width="1.2"/>'
+            )
+            elements.append(
+                f'<text x="{legend_x + 38:.2f}" y="{cy + 4:.2f}" '
+                f'font-family="Arial, sans-serif" font-size="13" fill="#222">{label}</text>'
+            )
 
     elements.append("</svg>")
     output_path.parent.mkdir(parents=True, exist_ok=True)

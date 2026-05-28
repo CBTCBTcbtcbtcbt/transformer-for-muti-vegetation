@@ -5,10 +5,11 @@ from pathlib import Path
 # group_num 表示需要在已有数据后面新增多少组不重复的序列。
 # 你可以直接修改这个变量，例如改成 100、1000 等。
 group_num = 1
-
-# point_num 表示每一个新生成序列中 1 的数量。
-# 例如 point_num = 8，就表示新生成的每一行都有 8 个位置是 1。
 point_num = 22
+# point_num 表示每一个新生成序列中，取值为 1/2/3 的位置总数。
+# 例如 point_num = 8，就表示新生成的每一行都有 8 个位置是 1/2/3，
+# 其余位置为 0。
+
 
 # USE_INPUT_CSV 是一个开关变量。
 # 当它为 True 时，程序会先读取 INPUT_CSV_PATH 对应的 CSV 文件，
@@ -28,9 +29,9 @@ SEQUENCE_LENGTH = 37
 # OUTPUT_CSV_PATH 表示最终保存 output 列表的 CSV 文件路径。
 OUTPUT_CSV_PATH = Path("input.csv")
 
-# FORCE_ONE_INDEXES 使用 0-based 下标，强制这些位置始终为 1。
-# 用户要求“1号和37号一定被选中”，对应下标分别是 0 和 36。
-FORCE_ONE_INDEXES = (0, 36)
+# FORCE_NONZERO_INDEXES 使用 0-based 下标，强制这些位置始终为非 0（1/2/3）。
+# “1号和37号一定被选中”对应下标分别是 0 和 36。
+FORCE_NONZERO_INDEXES = (0, 36)
 
 # MAX_FAILED_ATTEMPTS 表示连续多少次随机生成都重复后停止程序。
 # 这个保护用于避免 point_num 太小、可用组合已经耗尽时程序无限循环。
@@ -57,25 +58,26 @@ rotation_mapping = {
 
 
 def generate_random_group(required_point_num: int) -> list[int]:
-    """随机生成一个长度为 37，且正好包含 required_point_num 个 1 的 0/1 列表。"""
-    forced_set = set(FORCE_ONE_INDEXES)
+    """随机生成一个长度为 37，且正好包含 required_point_num 个非 0 值(1/2/3)的列表。"""
+    forced_set = set(FORCE_NONZERO_INDEXES)
     forced_count = len(forced_set)
     if required_point_num < forced_count:
         raise ValueError(
-            f"point_num 必须至少为 {forced_count}，因为存在强制选中点位：{FORCE_ONE_INDEXES}。"
+            f"point_num 必须至少为 {forced_count}，因为存在强制选中点位：{FORCE_NONZERO_INDEXES}。"
         )
 
-    # 先创建一个全是 0 的序列，并把强制点位写成 1。
+    # 先创建一个全是 0 的序列，并把强制点位写成随机 1/2/3。
     group = [0] * SEQUENCE_LENGTH
     for forced_index in forced_set:
-        group[forced_index] = 1
+        group[forced_index] = random.randint(1, 3)
 
-    # 其余要补充的 1，从非强制点位中随机抽取。
-    remain_ones = required_point_num - forced_count
+    # 其余要补充的非 0 位置，从非强制点位中随机抽取。
+    remain_nonzero = required_point_num - forced_count
     optional_indexes = [i for i in range(SEQUENCE_LENGTH) if i not in forced_set]
-    sampled_optional = random.sample(optional_indexes, remain_ones)
+    sampled_optional = random.sample(optional_indexes, remain_nonzero)
     for index in sampled_optional:
-        group[index] = 1
+        # 被抽中的位置随机赋值为 1/2/3。
+        group[index] = random.randint(1, 3)
 
     # 返回生成好的序列。
     return group
@@ -160,7 +162,7 @@ def load_groups_from_csv(csv_path: Path) -> list[list[int]]:
                     f"期望 {SEQUENCE_LENGTH} 列，实际 {len(row)} 列。"
                 )
 
-            # 把字符串形式的 0/1 转成整数，并去掉单元格两端可能存在的空格。
+            # 把字符串形式的 0/1/2/3 转成整数，并去掉单元格两端可能存在的空格。
             try:
                 group = [int(cell.strip()) for cell in row]
             except ValueError as exc:
@@ -168,10 +170,10 @@ def load_groups_from_csv(csv_path: Path) -> list[list[int]]:
                     f"输入 CSV 第 {row_index} 行包含非整数内容。"
                 ) from exc
 
-            # 每个元素都必须是 0 或 1，否则就不符合当前任务要求。
-            if any(bit not in (0, 1) for bit in group):
+            # 每个元素都必须是 0、1、2 或 3，否则就不符合当前任务要求。
+            if any(bit not in (0, 1, 2, 3) for bit in group):
                 raise ValueError(
-                    f"输入 CSV 第 {row_index} 行包含不是 0/1 的值。"
+                    f"输入 CSV 第 {row_index} 行包含不是 0/1/2/3 的值。"
                 )
 
             # 把这一行加入已读取列表。
@@ -230,9 +232,9 @@ def write_output_to_csv(output: list[list[int]], csv_path: Path) -> None:
         writer = csv.writer(csv_file)
 
         # 逐行写入 output 中的每一组序列。
-        # 这里不写表头，也不写 group_index，只保留 37 个 0/1 数值。
+        # 这里不写表头，也不写 group_index，只保留 37 个 0/1/2/3 数值。
         for group in output:
-            # 每一行只写入这一组的 37 个 0/1 值。
+            # 每一行只写入这一组的 37 个 0/1/2/3 值。
             writer.writerow(group)
 
 
@@ -299,8 +301,8 @@ def main() -> None:
     if not isinstance(group_num, int) or group_num <= 0:
         raise ValueError("group_num 必须是正整数。")
 
-    # 检查 point_num 是否是合法整数，因为它表示每个新序列中 1 的数量。
-    min_point_num = len(set(FORCE_ONE_INDEXES))
+    # 检查 point_num 是否是合法整数，因为它表示每个新序列中 1/2/3 的总数量。
+    min_point_num = len(set(FORCE_NONZERO_INDEXES))
     if not isinstance(point_num, int) or not min_point_num <= point_num <= SEQUENCE_LENGTH:
         raise ValueError(
             f"point_num 必须是 {min_point_num} 到 {SEQUENCE_LENGTH} 之间的整数。"
@@ -333,7 +335,7 @@ def main() -> None:
     print(f"输入 CSV 读取 {len(seed_groups)} 组序列。")
     print(f"本次新增 {group_num} 组序列。")
     print(f"最终输出 {len(output)} 组序列。")
-    print(f"每个新增序列包含 {point_num} 个 1。")
+    print(f"每个新增序列包含 {point_num} 个非 0 值（1/2/3）。")
     print(f"total 中共保存 {len(total)} 个旋转结果。")
     print(f"CSV 文件已保存到：{OUTPUT_CSV_PATH.resolve()}")
 
