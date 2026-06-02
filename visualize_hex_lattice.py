@@ -76,7 +76,22 @@ def lerp(a, b, t):
 
 
 def value_to_hex_color(v, vmin, vmax):
-    # Viridis-like stops
+    # 对于 0、1、2、3 这四个离散类别，固定使用用户指定的颜色。
+    # SVG 颜色使用十六进制格式：0 是白色，1 是灰色，2 是黄色，3 是黑色。
+    discrete_colors = {
+        0: "#ffffff",
+        1: "#808080",
+        2: "#ffff00",
+        3: "#000000",
+    }
+
+    # CSV 读取后的数值通常是 float，例如 1 会变成 1.0。
+    # 这里先四舍五入并检查误差，确保 1.0 这类值可以正确匹配到离散颜色。
+    rounded_value = int(round(v))
+    if rounded_value in discrete_colors and abs(v - rounded_value) < 1e-9:
+        return discrete_colors[rounded_value]
+
+    # 如果后续输入里出现了 0、1、2、3 之外的连续数值，保留原来的 Viridis-like 渐变逻辑作为兜底。
     stops = [
         (68, 1, 84),
         (59, 82, 139),
