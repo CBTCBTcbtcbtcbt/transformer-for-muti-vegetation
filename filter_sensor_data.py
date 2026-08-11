@@ -28,22 +28,30 @@ from scipy import signal
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-inputpath = PROJECT_ROOT / "data" / "model_1"
+inputpath = PROJECT_ROOT / "data" / "model_2"
 
 # outputpath 为 None 时，输出到 inputpath/sensor_filtered。
 outputpath: Path | None = None
 
 filter_mode = "lowpass"
 fs = 1000.0
-lowpass_cutoff = 5.0
+lowpass_cutoff = 2.0
 bandpass_low = 0.05
 bandpass_high = 1.0
-butterworth_order = 4
+butterworth_order = 5
 fir_numtaps = 401
 selected_columns = "all"
-trim_head = 0
-trim_tail = 0
+trim_head = 1200
+trim_tail = 1200
 max_nan_gap = 5
+
+# 是否默认生成滤波前后的对比图。
+# False 表示默认不画图；改为 True 后，不传命令行参数也会生成图片。
+make_plots = True
+
+# 是否默认允许覆盖已经存在的滤波结果。
+# False 可以防止误覆盖；需要反复处理同一文件时可以改为 True。
+overwrite_existing = True
 
 SENSOR_COLUMNS = ("TX", "TY", "TZ", "FX", "FY", "FZ")
 SENSOR_FILE_RE = re.compile(
@@ -331,8 +339,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trim-head", type=int, default=trim_head)
     parser.add_argument("--trim-tail", type=int, default=trim_tail)
     parser.add_argument("--max-nan-gap", type=int, default=max_nan_gap)
-    parser.add_argument("--plot", action="store_true", help="生成滤波前后对比图")
-    parser.add_argument("--overwrite", action="store_true", help="允许覆盖已有结果")
+    # 未提供命令行开关时，使用代码顶部 make_plots 的默认值。
+    # BooleanOptionalAction 同时提供 --plot 和 --no-plot，方便临时双向覆盖。
+    parser.add_argument(
+        "--plot",
+        action=argparse.BooleanOptionalAction,
+        default=make_plots,
+        help="是否生成滤波前后对比图",
+    )
+
+    # overwrite_existing 控制默认覆盖策略；命令行可用 --overwrite 或 --no-overwrite 覆盖。
+    parser.add_argument(
+        "--overwrite",
+        action=argparse.BooleanOptionalAction,
+        default=overwrite_existing,
+        help="是否允许覆盖已有结果",
+    )
     return parser
 
 
