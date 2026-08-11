@@ -3,12 +3,16 @@ import json
 import shutil
 from pathlib import Path
 
-# Fixed paths: run with `python adapter.py`
+# 固定路径：请在仓库根目录执行 `python adapter.py`。
 INPUT_DIR = Path("./output")
 OUTPUT_DIR = Path("./output/renamed")
 MAPPING_PATH = Path("./output/renamed/mapping.json")
-MAX_DISTANCE = 2.0
-FLOAT_TOLERANCE = 1e-6
+
+# motion_profile.py 现在把 x 列写为 mm，因此原来的 2 m 上限改为 2000 mm。
+MAX_DISTANCE_MM = 2000.0
+
+# 原有容差是 0.000001 m；换成 mm 后保持同一物理容差，即 0.001 mm。
+FLOAT_TOLERANCE_MM = 0.001
 
 
 def main() -> None:
@@ -30,6 +34,7 @@ def main() -> None:
     if not csv_files:
         raise RuntimeError(f"No CSV files found in input folder: {input_dir}")
 
+    # x_sums 保存每个 CSV 的 x 列总和；当前单位是 mm。
     x_sums = {}
     max_file = None
     max_x_sum = None
@@ -46,7 +51,8 @@ def main() -> None:
             max_x_sum = x_sum
             max_file = src_file.name
 
-    if max_x_sum is not None and max_x_sum > MAX_DISTANCE + FLOAT_TOLERANCE:
+    # x 列已经是 mm，因此使用 2000 mm 上限和 mm 单位容差进行判定。
+    if max_x_sum is not None and max_x_sum > MAX_DISTANCE_MM + FLOAT_TOLERANCE_MM:
         if output_dir.exists():
             for item in output_dir.iterdir():
                 if item.is_file() or item.is_symlink():
@@ -54,8 +60,8 @@ def main() -> None:
                 elif item.is_dir():
                     shutil.rmtree(item)
         raise RuntimeError(
-            f"Max x_sum exceeded limit: {max_file} has {max_x_sum}, "
-            f"limit is {MAX_DISTANCE} + {FLOAT_TOLERANCE}"
+            f"Max x_sum exceeded limit: {max_file} has {max_x_sum:.6f} mm, "
+            f"limit is {MAX_DISTANCE_MM:.6f} mm + {FLOAT_TOLERANCE_MM:.6f} mm"
         )
 
     index_to_name = {}
@@ -81,8 +87,8 @@ def main() -> None:
     print(f"Output folder: {output_dir.resolve()}")
     print(f"Mapping file: {mapping_path.resolve()}")
     for filename, x_sum in x_sums.items():
-        print(f"{filename}: x_sum={x_sum}")
-    print(f"Max x_sum file: {max_file}, x_sum={max_x_sum}")
+        print(f"{filename}: x_sum_mm={x_sum:.6f}")
+    print(f"Max x_sum file: {max_file}, x_sum_mm={max_x_sum:.6f}")
 
 
 if __name__ == "__main__":

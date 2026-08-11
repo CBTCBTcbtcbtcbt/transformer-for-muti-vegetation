@@ -5,9 +5,9 @@ T1 = 1
 T = 6
 
 # Velocity sweep hyperparameters
-VMIN = 0.05
+VMIN = 0.1
 VMAX = 0.4
-VSTEP = 0.05
+VSTEP = 0.1
 V_FILENAME_DECIMALS = 2
 
 # Output timeline start and sampling step
@@ -16,6 +16,10 @@ DT = 0.01
 
 OUTPUT_DIRNAME = "output"
 HEADERS = ["t", "x", "y", "z", "b", "c", "vx", "vy", "vz", "vb", "vc"]
+
+# 内部运动学计算仍使用 m 和 m/s；写入 CSV 前统一使用该比例转换成 mm 和 mm/s。
+# 保留原有列名可避免依赖 x、vx 等列名的后续脚本失效。
+M_TO_MM = 1000.0
 
 
 def velocity_at_time(t: float, vm: float, t1: float, t2: float) -> float:
@@ -75,10 +79,25 @@ def generate_profile_array(
     for i in range(num_steps):
         t = t_start + i * dt
         v = max(velocity_at_time(t, vm, t1, t2), 0.0)
+        # 以下位移和速度变量先保留 m、m/s 单位，便于保持原有的运动学计算公式。
         vc = 0.0
         vx = v
         x = vx * dt
-        rows.append([t, x, 0.0, 0.0, 0.0, 0.0, vx, 0.0, 0.0, 0.0, vc])
+
+        # position_values_m 保存五个位移列的内部 m 单位数值。
+        position_values_m = [x, 0.0, 0.0, 0.0, 0.0]
+
+        # velocity_values_m_per_s 保存五个速度列的内部 m/s 单位数值。
+        velocity_values_m_per_s = [vx, 0.0, 0.0, 0.0, vc]
+
+        # 时间 t 保持秒单位不变；其余十列都乘 1000，分别以 mm 和 mm/s 写入 CSV。
+        rows.append(
+            [
+                t,
+                *[value * M_TO_MM for value in position_values_m],
+                *[value * M_TO_MM for value in velocity_values_m_per_s],
+            ]
+        )
 
     return rows
 
@@ -141,8 +160,9 @@ def main() -> None:
             f"V_{vm:.{V_FILENAME_DECIMALS}f}.csv",
         )
         actual_output_file = write_profile_csv(rows, output_file)
-        total_distance = calculate_total_distance(vm, T1, T)
-        print(f"Saved CSV: {actual_output_file} | distance={total_distance:.6f}")
+        # 理论总距离由函数以 m 返回；打印时转换成 mm，与 CSV 中 x 列单位保持一致。
+        total_distance_mm = calculate_total_distance(vm, T1, T) * M_TO_MM
+        print(f"Saved CSV: {actual_output_file} | distance_mm={total_distance_mm:.6f}")
 
 
 if __name__ == "__main__":
