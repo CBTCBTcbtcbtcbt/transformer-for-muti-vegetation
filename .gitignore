@@ -2,6 +2,7 @@
 # data 下的原始数据量较大，只为本次修改的 gather 脚本保留版本控制入口。
 /data/*
 !/data/gather_data.py
+/filtered_data/
 __pycache__/
 /rotated_plots/
 /rotated_plots_sorted/

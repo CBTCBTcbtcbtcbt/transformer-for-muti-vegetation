@@ -5,8 +5,8 @@
 2. bandpass：Hamming 窗 FIR 带通，对应旧 sensor_data_filter_frequency.py。
 
 项目原始 sensor CSV 为无表头、逗号分隔的 6 列，依次映射为
-TX、TY、TZ、FX、FY、FZ。脚本默认批量处理指定文件夹中的
-sensor_编号_ang角度.csv，并保持无表头 6 列输出。
+TX、TY、TZ、FX、FY、FZ。脚本默认递归处理 data 文件夹中的
+sensor_编号_ang角度.csv，并在 output/filtered_data 中保留原目录结构。
 """
 
 from __future__ import annotations
@@ -28,10 +28,17 @@ from scipy import signal
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-inputpath = PROJECT_ROOT / "data" / "model_2"
+inputpath = PROJECT_ROOT / "data"
 
-# outputpath 为 None 时，输出到 inputpath/sensor_filtered。
-outputpath: Path | None = None
+# 过滤结果与原始 data 完全分离，避免递归扫描时再次读到生成的文件。
+# 例如 data/model_1/sensor_1_ang0.csv 会写入
+# output/filtered_data/model_1/sensor_1_ang0_lowpass_filtered.csv。
+outputpath = PROJECT_ROOT / "filtered_data"
+
+# data/datanew 是 rotate_force.py 生成的旧旋转结果，sensor_filtered 是旧版
+# filter_sensor_data.py 的输出；它们都不是这次应再次滤波的原始数据。
+# 如项目以后增加其他生成目录，可继续把目录名加入这个集合。
+excluded_directory_names = frozenset({"datanew", "sensor_filtered"})
 
 filter_mode = "lowpass"
 fs = 1000.0
@@ -90,8 +97,22 @@ def parse_sensor_filename(path: Path) -> tuple[int, float] | None:
     return int(match.group("index")), float(match.group("angle"))
 
 
-def discover_sensor_files(path: Path) -> list[Path]:
-    """接受单个 CSV 或文件夹，并返回按编号、角度排序的原始 sensor 文件。"""
+def discover_sensor_files(
+    path: Path,
+    excluded_names: frozenset[str] = excluded_directory_names,
+    excluded_roots: tuple[Path, ...] = (),
+) -> list[Path]:
+    """递归发现原始 sensor CSV，并跳过已知的生成目录。
+
+    Args:
+        path: 单个 sensor CSV，或需要递归检查的输入根目录。
+        excluded_names: 不应进入的目录名称；比较时不区分大小写。
+        excluded_roots: 不应读取的完整目录路径，主要用于排除输出目录。
+
+    Returns:
+        稳定排序后的文件路径列表。目录路径优先，其次依次按 sensor 编号、
+        角度和文件名排序，所以重复运行时处理顺序一致。
+    """
 
     if not path.exists():
         raise FileNotFoundError(f"输入路径不存在：{path}")
@@ -100,8 +121,30 @@ def discover_sensor_files(path: Path) -> list[Path]:
             raise ValueError(f"文件名不符合 sensor_编号_ang角度.csv：{path.name}")
         return [path]
 
-    files = [item for item in path.iterdir() if item.is_file() and parse_sensor_filename(item)]
-    return sorted(files, key=lambda item: (*parse_sensor_filename(item), item.name.lower()))
+    normalized_excluded_names = {name.casefold() for name in excluded_names}
+    files: list[Path] = []
+
+    # rglob 会检查输入根目录下任意深度的 CSV；严格文件名正则会自动排除
+    # gather CSV、PNG 以及名称带有 _filtered 后缀的旧输出文件。
+    for item in path.rglob("*.csv"):
+        relative_path = item.relative_to(path)
+        if any(part.casefold() in normalized_excluded_names for part in relative_path.parts[:-1]):
+            continue
+        if any(item == root or root in item.parents for root in excluded_roots):
+            continue
+        if item.is_file() and parse_sensor_filename(item) is not None:
+            files.append(item)
+
+    def sort_key(item: Path) -> tuple[str, int, float, str]:
+        """生成跨目录也稳定的排序键。"""
+
+        parsed_name = parse_sensor_filename(item)
+        assert parsed_name is not None  # files 列表只保存已经通过正则校验的路径。
+        sensor_index, angle = parsed_name
+        relative_parent = item.parent.relative_to(path).as_posix().casefold()
+        return relative_parent, sensor_index, angle, item.name.casefold()
+
+    return sorted(files, key=sort_key)
 
 
 def read_sensor_csv(path: Path) -> pd.DataFrame:
@@ -309,7 +352,17 @@ def save_comparison_plot(
 def process_sensor_file(path: Path, config: FilterConfig) -> Path:
     """读取、裁剪、滤波并保存一个 sensor 文件。"""
 
-    output_file = config.output_dir / f"{path.stem}_{config.mode}_filtered.csv"
+    # 目录输入时，先计算源文件相对于 inputpath 的父目录，再把它拼到
+    # outputpath 后面。单文件输入没有可复制的目录树，直接写到 outputpath。
+    relative_parent = (
+        Path()
+        if config.input_path.is_file()
+        else path.parent.relative_to(config.input_path)
+    )
+    file_output_dir = config.output_dir / relative_parent
+    file_output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_file = file_output_dir / f"{path.stem}_{config.mode}_filtered.csv"
     if output_file.exists() and not config.overwrite:
         raise FileExistsError(f"输出已存在；使用 --overwrite 可覆盖：{output_file}")
 
@@ -318,7 +371,7 @@ def process_sensor_file(path: Path, config: FilterConfig) -> Path:
     filtered_frame = filter_frame(cropped_frame, config)
     write_csv_atomically(filtered_frame, output_file)
     if config.make_plots:
-        save_comparison_plot(cropped_frame, filtered_frame, path, config.output_dir, config)
+        save_comparison_plot(cropped_frame, filtered_frame, path, file_output_dir, config)
     return output_file
 
 
@@ -326,8 +379,18 @@ def build_parser() -> argparse.ArgumentParser:
     """创建命令行接口，并让顶部变量继续作为可编辑默认值。"""
 
     parser = argparse.ArgumentParser(description="批量滤波原始 6 轴 sensor CSV")
-    parser.add_argument("--input-path", type=Path, default=inputpath, help="单个文件或输入文件夹")
-    parser.add_argument("--output-path", type=Path, default=outputpath, help="输出文件夹")
+    parser.add_argument(
+        "--input-path",
+        type=Path,
+        default=inputpath,
+        help="单个文件或要递归检查的输入文件夹",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=Path,
+        default=outputpath,
+        help="镜像保存目录结构的输出根目录",
+    )
     parser.add_argument("--mode", choices=("lowpass", "bandpass"), default=filter_mode)
     parser.add_argument("--fs", type=float, default=fs, help="采样率（Hz）")
     parser.add_argument("--cutoff", type=float, default=lowpass_cutoff, help="低通截止频率（Hz）")
@@ -389,7 +452,7 @@ def main() -> int:
     )
     validate_filter_config(config)
 
-    files = discover_sensor_files(config.input_path)
+    files = discover_sensor_files(config.input_path, excluded_roots=(config.output_dir,))
     if not files:
         print(f"未找到合法文件：{config.input_path}/sensor_编号_ang角度.csv")
         return 1
