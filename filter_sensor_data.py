@@ -17,6 +17,10 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
+# 该脚本只需要批量保存 PNG，不需要弹出绘图窗口；Agg 后端也能在缺少 Tk/Tcl 的环境中工作。
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -28,7 +32,8 @@ from scipy import signal
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-inputpath = PROJECT_ROOT / "data"
+
+inputpath = PROJECT_ROOT / "data" 
 
 # 过滤结果与原始 data 完全分离，避免递归扫描时再次读到生成的文件。
 # 例如 data/model_1/sensor_1_ang0.csv 会写入
@@ -41,18 +46,19 @@ outputpath = PROJECT_ROOT / "filtered_data"
 excluded_directory_names = frozenset({"datanew", "sensor_filtered"})
 
 filter_mode = "lowpass"
-fs = 1000.0
-lowpass_cutoff = 2.0
+fs = 500.0
+lowpass_cutoff = 2
 bandpass_low = 0.05
 bandpass_high = 1.0
 butterworth_order = 5
 fir_numtaps = 401
 selected_columns = "all"
+# 截取区间采用左闭右开索引：[trim_head, trim_tail)；trim_tail=0 表示一直取到末尾。
 trim_head = 1200
-trim_tail = 1200
+trim_tail = 2800
 max_nan_gap = 5
 
-# 是否默认生成滤波前后的对比图。
+# 是否默认生成只包含滤波结果的曲线图。
 # False 表示默认不画图；改为 True 后，不传命令行参数也会生成图片。
 make_plots = True
 
@@ -194,15 +200,20 @@ def parse_columns(text: str) -> tuple[int, ...]:
 
 
 def trim_frame(frame: pd.DataFrame, head: int, tail: int) -> pd.DataFrame:
-    """裁掉首尾指定行数，并检查结果仍有数据。"""
+    """截取从 ``head`` 到 ``tail`` 的数据；``tail`` 超出总长度时截取到末尾。"""
 
     if head < 0 or tail < 0:
         raise ValueError("trim_head 和 trim_tail 不能为负数")
-    if head + tail >= len(frame):
+
+    # trim_tail=0 保留为“截取到文件末尾”的便捷写法，确保脚本顶部的默认配置仍可直接运行。
+    # 当 tail 大于文件总行数时，使用总行数作为结束位置，以满足“数据不足则取到最后”的需求。
+    end = len(frame) if tail == 0 else min(tail, len(frame))
+    if head >= end:
         raise ValueError(
-            f"裁剪行数 {head}+{tail} 必须小于原始行数 {len(frame)}"
+            f"截取区间无有效数据：head={head}，tail={tail}，原始行数={len(frame)}"
         )
-    end = len(frame) - tail if tail else len(frame)
+
+    # pandas 的 iloc 使用左闭右开区间，即包含索引 head、不包含索引 end。
     return frame.iloc[head:end].reset_index(drop=True).copy()
 
 
@@ -317,16 +328,25 @@ def write_csv_atomically(frame: pd.DataFrame, output_file: Path) -> None:
     temporary_file.replace(output_file)
 
 
-def save_comparison_plot(
-    original: pd.DataFrame,
+def save_filtered_plot(
     filtered: pd.DataFrame,
     source_file: Path,
     output_dir: Path,
     config: FilterConfig,
 ) -> None:
-    """把所选列的滤波前后曲线画在同一张图中，便于肉眼检查。"""
+    """只绘制所选列的滤波结果，并用数据组编号作为横轴。"""
 
-    time_seconds = np.arange(len(original), dtype=float) / config.sample_rate
+    # 数据组编号从 1 开始，使横轴与用户阅读 CSV 时常用的“第 1 组、第 2 组”一致。
+    sample_numbers = np.arange(1, len(filtered) + 1)
+
+    # 较短数据每 200 组显示一个刻度，较长数据每 500 组显示一个刻度，避免标签过密。
+    tick_interval = 200 if len(filtered) <= 2000 else 500
+    # 除起点 1 外，其余刻度使用整齐的 200/500 倍数，例如 1、500、1000……4000。
+    tick_positions = [1, *range(tick_interval, len(filtered) + 1, tick_interval)]
+    # 如果最后一组不恰好落在固定间隔上，也把末尾编号显示出来，明确图中数据范围。
+    if tick_positions[-1] != len(filtered):
+        tick_positions.append(len(filtered))
+
     figure, axes = plt.subplots(
         len(config.columns),
         1,
@@ -337,12 +357,19 @@ def save_comparison_plot(
     for row, column_index in enumerate(config.columns):
         axis = axes[row, 0]
         column_name = SENSOR_COLUMNS[column_index]
-        axis.plot(time_seconds, original.iloc[:, column_index], alpha=0.45, label="raw")
-        axis.plot(time_seconds, filtered.iloc[:, column_index], linewidth=1.2, label="filtered")
+        # 图片中只保留滤波后的曲线，不再绘制任何原始数据点或原始数据曲线。
+        axis.plot(
+            sample_numbers,
+            filtered.iloc[:, column_index],
+            linewidth=1.2,
+            label="filtered",
+        )
         axis.set_ylabel(column_name)
+        axis.set_xlim(1, len(filtered))
+        axis.set_xticks(tick_positions)
         axis.grid(True, alpha=0.3)
         axis.legend(loc="upper right")
-    axes[-1, 0].set_xlabel("Time (s)")
+    axes[-1, 0].set_xlabel(f"Data group number (1-{len(filtered)})")
     figure.suptitle(f"{source_file.name} - {config.mode}")
     figure.tight_layout()
     figure.savefig(output_dir / f"{source_file.stem}_{config.mode}.png", dpi=160)
@@ -371,7 +398,8 @@ def process_sensor_file(path: Path, config: FilterConfig) -> Path:
     filtered_frame = filter_frame(cropped_frame, config)
     write_csv_atomically(filtered_frame, output_file)
     if config.make_plots:
-        save_comparison_plot(cropped_frame, filtered_frame, path, file_output_dir, config)
+
+        save_filtered_plot(filtered_frame, path, config.output_dir, config)
     return output_file
 
 
@@ -399,8 +427,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--order", type=int, default=butterworth_order, help="Butterworth 阶数")
     parser.add_argument("--numtaps", type=int, default=fir_numtaps, help="Hamming FIR 奇数长度")
     parser.add_argument("--columns", default=selected_columns, help="all、TX..FZ 或 0..5，逗号分隔")
-    parser.add_argument("--trim-head", type=int, default=trim_head)
-    parser.add_argument("--trim-tail", type=int, default=trim_tail)
+    parser.add_argument("--trim-head", type=int, default=trim_head, help="截取区间的起始索引（包含）")
+    parser.add_argument(
+        "--trim-tail",
+        type=int,
+        default=trim_tail,
+        help="截取区间的结束索引（不包含）；0 或超过总行数时取到末尾",
+    )
     parser.add_argument("--max-nan-gap", type=int, default=max_nan_gap)
     # 未提供命令行开关时，使用代码顶部 make_plots 的默认值。
     # BooleanOptionalAction 同时提供 --plot 和 --no-plot，方便临时双向覆盖。
@@ -408,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--plot",
         action=argparse.BooleanOptionalAction,
         default=make_plots,
-        help="是否生成滤波前后对比图",
+        help="是否生成只包含滤波结果的曲线图",
     )
 
     # overwrite_existing 控制默认覆盖策略；命令行可用 --overwrite 或 --no-overwrite 覆盖。
