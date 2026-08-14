@@ -13,14 +13,17 @@ TOTAL_POINTS = sum(ROW_LENGTHS)  # 37
 # 用户可以直接修改的默认参数
 # =============================================================================
 
+# SCRIPT_DIR 是当前脚本所在的 Experiment 文件夹。
+SCRIPT_DIR = Path(__file__).resolve().parent
+
 # 输入 CSV：每个样本包含 37 个六边形点位数值。
-DEFAULT_INPUT_PATH = "input.csv"
+DEFAULT_INPUT_PATH = SCRIPT_DIR / "input.csv"
 
 # 所有样本组成的大图输出路径。
-DEFAULT_OVERVIEW_OUTPUT_PATH = "hex_lattice.svg"
+DEFAULT_OVERVIEW_OUTPUT_PATH = SCRIPT_DIR / "hex_lattice.svg"
 
 # 每组样本的六张旋转图输出根目录。
-DEFAULT_ROTATIONS_OUTPUT_ROOT = "rotated_plots"
+DEFAULT_ROTATIONS_OUTPUT_ROOT = SCRIPT_DIR / "rotated_plots"
 
 # 大图中每行显示的样本数量。
 DEFAULT_COLUMNS = 4

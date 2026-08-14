@@ -5,7 +5,10 @@
 2. 对六个数据列分别排序，各去掉最小 10% 和最大 10% 的样本。
 3. 对每一列剩余的 80% 样本求平均。
 4. 调用 rotate_force.py，把平均后的 FX、FY 转换到 0° 坐标系。
-5. 在同一个 model 内按角度合并 sensor 1～4，每个 ``angB.csv`` 写四行。
+5. 在同一个 model 内按角度合并 sensor 1～4；某个流速缺失时输出错误提示，
+   但仍用其余流速生成 ``angB.csv``。
+
+单个输入文件或单个输出文件出错时，脚本会打印失败原因并继续处理其他文件。
 
 输出 CSV 没有表头，每行七列依次为：
 TX、TY、TZ、FX_0、FY_0、FZ、flow_speed。
@@ -28,13 +31,17 @@ from rotate_force import rotate_force_xy_to_zero_frame
 # 用户可直接修改的默认配置；命令行参数可以临时覆盖这些值。
 # =============================================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+# SCRIPT_DIR 是当前脚本所在的 Experiment 文件夹。
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# REPO_ROOT 是仓库根目录；滤波数据和汇总数据统一存放在仓库根目录。
+REPO_ROOT = SCRIPT_DIR.parent
 
 # 默认读取 filter_sensor_data.py 生成的镜像目录。
-inputpath = PROJECT_ROOT / "output" / "filtered_data"
+inputpath = REPO_ROOT / "filtered_data"
 
 # 输出继续保留 model_1、model_2 等相对目录。
-outputpath = PROJECT_ROOT / "output" / "summarized_data"
+outputpath = REPO_ROOT / "summarized_data"
 
 # 每一列两端各丢弃 10%；最终参与平均的是中间 80% 的样本。
 trim_fraction = 0.10
@@ -252,6 +259,11 @@ def summarize_sensor_tree(
         本次成功写出的所有 CSV 路径。
     """
 
+    # fraction 是整个批次共用的参数。这个参数非法时，所有文件都不可能被
+    # 正确处理，因此在进入逐文件容错循环前统一拒绝，而不是重复打印错误。
+    if not 0 <= fraction < 0.5:
+        raise ValueError("trim_fraction 必须满足 0 <= fraction < 0.5")
+
     files = discover_sensor_files(input_root, output_root)
     if not files:
         raise FileNotFoundError(f"没有找到符合 sensor_A_angB 规则的 CSV：{input_root}")
@@ -266,26 +278,38 @@ def summarize_sensor_tree(
         parsed_name = parse_sensor_filename(source_file)
         assert parsed_name is not None  # discover_sensor_files 已经完成校验。
         sensor_number, angle = parsed_name
-
-        if sensor_number not in FLOW_SPEED_BY_SENSOR:
-            raise KeyError(
-                f"sensor_{sensor_number} 没有流速映射；请在 FLOW_SPEED_BY_SENSOR 中补充"
-            )
-
         relative_parent = (
             Path()
             if input_root.is_file()
             else source_file.parent.relative_to(input_root)
         )
-        sensor_rows = grouped_rows[relative_parent][angle]
-        if sensor_number in sensor_rows:
-            raise ValueError(
-                f"同一目录和角度存在重复 sensor_{sensor_number} 文件：{source_file}"
-            )
 
-        values = read_numeric_sensor_csv(source_file)
-        means = calculate_trimmed_column_means(values, fraction)
-        sensor_rows[sensor_number] = rotate_mean_force(means, angle)
+        # 在读取 CSV 之前先建立角度分组。这样即使本文件损坏，该角度仍会在
+        # 输出阶段报告“缺少某个流速”，而不会悄悄消失。
+        sensor_rows = grouped_rows[relative_parent][angle]
+
+        # 每个源文件都有独立的异常边界：其中一个 CSV 格式错误、存在 NaN、
+        # 缺少流速映射或发生重复时，只跳过这个文件，后面的文件继续处理。
+        try:
+            if sensor_number not in FLOW_SPEED_BY_SENSOR:
+                raise KeyError(
+                    f"sensor_{sensor_number} 没有流速映射；"
+                    "请在 FLOW_SPEED_BY_SENSOR 中补充"
+                )
+            if sensor_number in sensor_rows:
+                raise ValueError(
+                    f"同一目录和角度存在重复 sensor_{sensor_number} 文件"
+                )
+
+            values = read_numeric_sensor_csv(source_file)
+            means = calculate_trimmed_column_means(values, fraction)
+            sensor_rows[sensor_number] = rotate_mean_force(means, angle)
+            print(
+                f"[成功] 输入 {source_file} -> "
+                f"截尾平均完成（流速 {FLOW_SPEED_BY_SENSOR[sensor_number]:g}）"
+            )
+        except Exception as error:  # 批处理必须继续，所以在单文件粒度捕获异常。
+            print(f"[失败] 输入 {source_file}：{error}；已跳过")
 
     expected_sensors = set(FLOW_SPEED_BY_SENSOR)
     output_files: list[Path] = []
@@ -293,24 +317,48 @@ def summarize_sensor_tree(
         for angle in sorted(grouped_rows[relative_parent]):
             sensor_rows = grouped_rows[relative_parent][angle]
             actual_sensors = set(sensor_rows)
-            if actual_sensors != expected_sensors:
-                missing = sorted(expected_sensors - actual_sensors)
-                unexpected = sorted(actual_sensors - expected_sensors)
-                raise ValueError(
-                    f"{relative_parent or Path('.')} 的 ang{format_angle(angle)} 数据不完整；"
-                    f"缺少 sensor={missing}，额外 sensor={unexpected}"
+            missing_sensors = sorted(expected_sensors - actual_sensors)
+            if missing_sensors:
+                missing_speeds = [
+                    FLOW_SPEED_BY_SENSOR[sensor_number]
+                    for sensor_number in missing_sensors
+                ]
+                missing_speed_text = "、".join(
+                    format(speed, "g") for speed in missing_speeds
+                )
+                print(
+                    f"[错误] {relative_parent or Path('.')} 的 "
+                    f"ang{format_angle(angle)} 缺少流速 {missing_speed_text}；"
+                    f"仍将使用已有流速生成 {len(sensor_rows)} 行"
                 )
 
-            # 按 sensor 编号排列，所以四行流速固定依次为 0.1、0.2、0.3、0.4。
+            # 如果这个角度的所有输入文件都失败，就没有任何数值可写。此时
+            # 跳过空表，但继续处理后面的角度和 model。
+            if not sensor_rows:
+                print(
+                    f"[失败] 输出 {relative_parent or Path('.')} / "
+                    f"ang{format_angle(angle)}.csv：没有可用行；已跳过"
+                )
+                continue
+
+            # 只遍历实际成功的 sensor，避免缺失流速时访问不存在的数据。
+            # 按 sensor 编号排列后，已有流速仍保持从小到大的稳定顺序。
             rows: list[list[float]] = []
-            for sensor_number in sorted(expected_sensors):
+            for sensor_number in sorted(sensor_rows):
                 row = sensor_rows[sensor_number].tolist()
                 row.append(FLOW_SPEED_BY_SENSOR[sensor_number])
                 rows.append(row)
 
             output_file = output_root / relative_parent / f"ang{format_angle(angle)}.csv"
-            write_group_csv(rows, output_file, overwrite)
-            output_files.append(output_file)
+
+            # 写入失败也只影响当前角度文件。例如 --no-overwrite 遇到已有文件
+            # 时，其他 model 和角度仍然可以继续生成。
+            try:
+                write_group_csv(rows, output_file, overwrite)
+                output_files.append(output_file)
+                print(f"[成功] 输出 {output_file}（{len(rows)} 行）")
+            except Exception as error:  # 输出文件之间彼此独立，可安全继续。
+                print(f"[失败] 输出 {output_file}：{error}；已跳过")
 
     return output_files
 

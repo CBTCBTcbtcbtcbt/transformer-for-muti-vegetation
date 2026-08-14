@@ -21,9 +21,12 @@ import pandas as pd
 # 用户可直接修改的默认配置
 # =============================================================================
 
-# inputpath 指定需要处理的文件夹。这里默认处理 data/model_1。
-# 使用 __file__ 定位后，脚本从任何工作目录启动都能找到同一个文件夹。
-inputpath = Path(__file__).resolve().parent / "model_1"
+# SCRIPT_DIR 是当前脚本所在的 Experiment 文件夹，REPO_ROOT 是仓库根目录。
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+
+# inputpath 指定需要处理的文件夹。gather 不属于正式数据链，但保留工具时默认指向真实目录。
+inputpath = REPO_ROOT / "data" / "model_1"
 
 # outputpath 为 None 时，结果写入 inputpath/gather_figure。
 # 也可以改成 Path(r"D:\your\output") 之类的绝对路径。

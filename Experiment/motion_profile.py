@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 # Motion profile hyperparameters
 T1 = 1
@@ -16,6 +17,13 @@ DT = 0.01
 
 OUTPUT_DIRNAME = "output"
 HEADERS = ["t", "x", "y", "z", "b", "c", "vx", "vy", "vz", "vb", "vc"]
+
+# SCRIPT_DIR 是当前脚本所在的 Experiment 文件夹，REPO_ROOT 是仓库根目录。
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+
+# 运动轨迹统一写入仓库根目录的 output，避免在 Experiment 内产生第二份输出目录。
+OUTPUT_DIR = REPO_ROOT / OUTPUT_DIRNAME
 
 # 内部运动学计算仍使用 m 和 m/s；写入 CSV 前统一使用该比例转换成 mm 和 mm/s。
 # 保留原有列名可避免依赖 x、vx 等列名的后续脚本失效。
@@ -150,7 +158,8 @@ def main() -> None:
     if V_FILENAME_DECIMALS < 0:
         raise ValueError("V_FILENAME_DECIMALS must be >= 0.")
 
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), OUTPUT_DIRNAME)
+    # 使用基于脚本位置推导出的绝对目录，因此可以从任意工作目录执行。
+    output_dir = OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
     for vm in generate_vm_values(VMIN, VMAX, VSTEP):

@@ -20,6 +20,9 @@ ROOT_COUNT_RECIPE = (4, 4, 4, 5, 5, 6, 6, 8, 8, 8, 10, 10, 12, 12, 18, 20, 22)
 # 每一个生成序列的固定长度，与 generator.py 中的六边形点位数一致。
 SEQUENCE_LENGTH = 37
 
+# 构型数据与本脚本同属 Experiment，默认输出固定为脚本旁边的 input.csv。
+DEFAULT_OUTPUT_PATH = Path(__file__).resolve().with_name("input.csv")
+
 
 def build_argument_parser() -> argparse.ArgumentParser:
     """创建批量构建脚本的命令行参数解析器。"""
@@ -30,8 +33,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     # --output 允许把最终结果写到自定义文件；默认仍写入 input.csv。
     parser.add_argument(
-        "--output", type=Path, default=Path("input.csv"),
-        help="最终 CSV 路径，默认值为 input.csv。",
+        "--output", type=Path, default=DEFAULT_OUTPUT_PATH,
+        help=f"最终 CSV 路径，默认值为 {DEFAULT_OUTPUT_PATH}。",
     )
 
     # --overwrite 是显式保护开关，防止批量脚本无提示地删掉已有输入数据。

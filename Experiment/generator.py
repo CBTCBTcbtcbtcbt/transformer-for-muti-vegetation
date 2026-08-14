@@ -15,6 +15,9 @@ from typing import Sequence
 # 每个六边形序列固定包含 37 个位置。
 SEQUENCE_LENGTH = 37
 
+# 构型文件属于 Experiment，因此默认输入和输出都指向脚本旁边的 input.csv。
+DEFAULT_INPUT_CSV_PATH = Path(__file__).resolve().with_name("input.csv")
+
 # 最终数据要求为二进制序列，因此只允许 0 和 1 两种数值。
 BINARY_VALUES = (0, 1)
 
@@ -264,14 +267,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     # --input 指定读取已有序列的来源文件。
     parser.add_argument(
-        "--input", type=Path, default=Path("input.csv"),
-        help="已有序列的 CSV 路径，默认值为 input.csv。",
+        "--input", type=Path, default=DEFAULT_INPUT_CSV_PATH,
+        help=f"已有序列的 CSV 路径，默认值为 {DEFAULT_INPUT_CSV_PATH}。",
     )
 
     # --output 指定保存合并结果的目标文件；默认与输入相同以实现原地追加。
     parser.add_argument(
-        "--output", type=Path, default=Path("input.csv"),
-        help="结果 CSV 路径，默认值为 input.csv。",
+        "--output", type=Path, default=DEFAULT_INPUT_CSV_PATH,
+        help=f"结果 CSV 路径，默认值为 {DEFAULT_INPUT_CSV_PATH}。",
     )
 
     # --allow-missing-input 仅用于首次调用，以允许从不存在的 input.csv 开始。

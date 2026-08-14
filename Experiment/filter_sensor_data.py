@@ -6,7 +6,7 @@
 
 项目原始 sensor CSV 为无表头、逗号分隔的 6 列，依次映射为
 TX、TY、TZ、FX、FY、FZ。脚本默认递归处理 data 文件夹中的
-sensor_编号_ang角度.csv，并在 output/filtered_data 中保留原目录结构。
+sensor_编号_ang角度.csv，并在仓库根目录的 filtered_data 中保留原目录结构。
 """
 
 from __future__ import annotations
@@ -31,14 +31,20 @@ from scipy import signal
 # 用户可直接修改的默认配置；命令行参数可以临时覆盖这些值。
 # =============================================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+# SCRIPT_DIR 是当前脚本所在的 Experiment 文件夹。
+SCRIPT_DIR = Path(__file__).resolve().parent
 
-inputpath = PROJECT_ROOT / "data" 
+# REPO_ROOT 是仓库根目录；正式数据目录统一放在这里，而不是放进 Experiment。
+REPO_ROOT = SCRIPT_DIR.parent
+
+# 默认从仓库根目录的 data 读取原始 sensor 数据。
+inputpath = REPO_ROOT / "data"
 
 # 过滤结果与原始 data 完全分离，避免递归扫描时再次读到生成的文件。
 # 例如 data/model_1/sensor_1_ang0.csv 会写入
-# output/filtered_data/model_1/sensor_1_ang0_lowpass_filtered.csv。
-outputpath = PROJECT_ROOT / "filtered_data"
+# filtered_data/model_1/sensor_1_ang0_lowpass_filtered.csv。
+# 默认把滤波结果写到仓库根目录的 filtered_data。
+outputpath = REPO_ROOT / "filtered_data"
 
 # data/datanew 是 rotate_force.py 生成的旧旋转结果，sensor_filtered 是旧版
 # filter_sensor_data.py 的输出；它们都不是这次应再次滤波的原始数据。
@@ -398,8 +404,8 @@ def process_sensor_file(path: Path, config: FilterConfig) -> Path:
     filtered_frame = filter_frame(cropped_frame, config)
     write_csv_atomically(filtered_frame, output_file)
     if config.make_plots:
-
-        save_filtered_plot(filtered_frame, path, config.output_dir, config)
+        # 图片与对应的滤波 CSV 使用同一个目录，从而保留 model_1 等输入子目录结构。
+        save_filtered_plot(filtered_frame, path, file_output_dir, config)
     return output_file
 
 

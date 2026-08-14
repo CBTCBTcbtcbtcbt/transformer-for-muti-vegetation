@@ -3,10 +3,16 @@ import json
 import shutil
 from pathlib import Path
 
-# 固定路径：请在仓库根目录执行 `python adapter.py`。
-INPUT_DIR = Path("./output")
-OUTPUT_DIR = Path("./output/renamed")
-MAPPING_PATH = Path("./output/renamed/mapping.json")
+# SCRIPT_DIR 是当前脚本所在的 Experiment 文件夹。
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# REPO_ROOT 是仓库根目录；这样从任意工作目录启动脚本都能找到同一个 output。
+REPO_ROOT = SCRIPT_DIR.parent
+
+# 运动轨迹、编号副本和映射文件统一保存在仓库根目录的 output 中。
+INPUT_DIR = REPO_ROOT / "output"
+OUTPUT_DIR = INPUT_DIR / "renamed"
+MAPPING_PATH = OUTPUT_DIR / "mapping.json"
 
 # motion_profile.py 现在把 x 列写为 mm，因此原来的 2 m 上限改为 2000 mm。
 MAX_DISTANCE_MM = 2000.0

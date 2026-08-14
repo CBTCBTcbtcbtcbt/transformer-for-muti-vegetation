@@ -7,6 +7,16 @@ from pathlib import Path
 
 ANG_PATTERN = re.compile(r"_ang(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 
+# SCRIPT_DIR 是当前脚本所在的 Experiment 文件夹。
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# REPO_ROOT 是仓库根目录；独立批处理工具默认从根目录 data 读写。
+REPO_ROOT = SCRIPT_DIR.parent
+
+# 以下变量保留为代码内可修改的默认参数，同时函数调用者仍可显式覆盖。
+DEFAULT_DATA_ROOT = REPO_ROOT / "data"
+DEFAULT_ROTATED_OUTPUT_ROOT = DEFAULT_DATA_ROOT / "datanew"
+
 
 def extract_angle_from_filename(csv_path: str | Path) -> float:
     """Extract clockwise angle (deg) from names like sensor_1_ang180.csv."""
@@ -84,14 +94,14 @@ def rotate_force_csv_to_zero_frame(
 
 
 def batch_rotate_sensor_csvs_to_zero_frame(
-    data_root: str | Path = Path("data"),
-    output_root: str | Path = Path("data") / "datanew",
+    data_root: str | Path = DEFAULT_DATA_ROOT,
+    output_root: str | Path = DEFAULT_ROTATED_OUTPUT_ROOT,
 ) -> list[Path]:
     """
     Batch-rotate all raw sensor angle CSV files and write to data/datanew.
 
-    Keeps relative folder structure under data_root, e.g.:
-    data/yp1/sensor_1_ang60.csv -> data/datanew/yp1/sensor_1_ang60.csv
+    保留输入文件在 data_root 下的相对目录结构，例如：
+    data/model_1/sensor_1_ang60.csv -> data/datanew/model_1/sensor_1_ang60.csv
     """
     data_root = Path(data_root)
     output_root = Path(output_root)
@@ -116,4 +126,4 @@ def batch_rotate_sensor_csvs_to_zero_frame(
 if __name__ == "__main__":
     outputs = batch_rotate_sensor_csvs_to_zero_frame()
     print(f"Processed files: {len(outputs)}")
-    print("Output root: data/datanew")
+    print(f"Output root: {DEFAULT_ROTATED_OUTPUT_ROOT}")
